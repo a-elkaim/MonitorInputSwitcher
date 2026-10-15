@@ -1,0 +1,92 @@
+# Builds the Linux and Windows binaries and publishes them as a GitHub release when a version tag
+# is pushed:  git tag v1.0.0 && git push origin v1.0.0
+# It can also be started by hand (Actions tab > Release > Run workflow, or `gh workflow run
+# release.yml`) to check that both builds pass: that builds, tests and keeps the binaries as run
+# artifacts, without publishing a release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux
+          - os: windows-latest
+            name: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the tag matches the version in Cargo.toml
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+
+      - name: Install Rust
+        shell: bash
+        run: rustup update stable && rustup default stable
+
+      - name: Install Linux build dependencies
+        if: matrix.name == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libxkbcommon-dev libwayland-dev libegl-dev
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Test
+        run: cargo test --release --locked
+
+      # Same layout as the repository, so the install steps in the README work as written.
+      - name: Package (Linux)
+        if: matrix.name == 'linux'
+        run: |
+          dir=monitor-input-switcher-${GITHUB_REF_NAME}-linux-x86_64
+          mkdir -p "$dir/target/release" "$dir/assets" "$dir/scripts"
+          cp target/release/monitor-input-switcher "$dir/target/release/"
+          cp assets/icon-256.png "$dir/assets/"
+          cp scripts/setup-system.sh scripts/install.sh scripts/uninstall.sh "$dir/scripts/"
+          cp README.md LICENSE "$dir/"
+          tar -czf "$dir.tar.gz" "$dir"
+
+      - name: Package (Windows)
+        if: matrix.name == 'windows'
+        shell: bash
+        run: cp target/release/monitor-input-switcher.exe "monitor-input-switcher-${GITHUB_REF_NAME}-windows-x86_64.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            monitor-input-switcher-*.tar.gz
+            monitor-input-switcher-*.exe
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "Monitor Input Switcher $GITHUB_REF_NAME" --generate-notes \
+            monitor-input-switcher-*

@@ -1,0 +1,11 @@
+# Rust build output (Linux and Windows)
+/target/
+**/*.rs.bk
+
+# Editors and OS files
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

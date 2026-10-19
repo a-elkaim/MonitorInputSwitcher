@@ -554,15 +554,16 @@ impl eframe::App for SettingsApp {
                     ui.set_width(ui.available_width());
                     ui.strong("Inputs");
                     let mut remove = None;
-                    egui::Grid::new("inputs").num_columns(7).spacing([8.0, 6.0]).show(ui, |ui| {
-                        for h in ["Name", "Value", "", "Shortcut", "In Next", "", ""] {
+                    egui::Grid::new("inputs").num_columns(6).spacing([8.0, 6.0]).show(ui, |ui| {
+                        for h in ["Name", "Value", "Shortcut", "In Next", "", ""] {
                             ui.strong(h);
                         }
                         ui.end_row();
                         for i in 0..self.rows.len() {
                             ui.add_sized([160.0, 22.0], egui::TextEdit::singleline(&mut self.rows[i].name));
-                            ui.add(egui::DragValue::new(&mut self.rows[i].value).range(0..=0xFFFF));
-                            ui.weak(ddc::input_name(self.rows[i].value));
+                            let standard = ddc::input_name(self.rows[i].value);
+                            ui.add(egui::DragValue::new(&mut self.rows[i].value).range(0..=0xFFFF))
+                                .on_hover_text(format!("Standard name for this code: {standard} (your monitor may label it differently)"));
                             self.hotkey_button(ui, Capture::Row(i));
                             ui.checkbox(&mut self.rows[i].in_next, "").on_hover_text(
                                 "Include this input when cycling with \"Next input\". Untick inputs with nothing plugged in.",
@@ -603,7 +604,7 @@ impl eframe::App for SettingsApp {
                         ui.label(&self.inputs_text);
                     }
                     ui.weak(format!(
-                        "Value = the input code (VCP 0x60) sent to the monitor; standard codes are named next to it. \
+                        "Click a name to rename it. Value = the input code (VCP 0x60) sent to the monitor; hover it for the standard name. \
                          \"Next input\" only cycles through inputs ticked In Next.{}",
                         platform::SHORTCUTS_HINT
                     ));

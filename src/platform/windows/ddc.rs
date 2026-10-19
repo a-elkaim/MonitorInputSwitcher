@@ -8,8 +8,11 @@ use crate::ddc::{DisplayInfo, INPUT_VCP};
 use std::collections::HashMap;
 use windows::Win32::Devices::Display::{
     CapabilitiesRequestAndCapabilitiesReply, DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
-    DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
-    DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, DestroyPhysicalMonitor,
+    DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, DISPLAYCONFIG_MODE_INFO,
+    DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED, DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL,
+    DISPLAYCONFIG_OUTPUT_TECHNOLOGY_LVDS, DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED,
+    DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME,
+    DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY, DestroyPhysicalMonitor,
     DisplayConfigGetDeviceInfo, GetCapabilitiesStringLength, GetDisplayConfigBufferSizes,
     GetNumberOfPhysicalMonitorsFromHMONITOR, GetPhysicalMonitorsFromHMONITOR,
     GetVCPFeatureAndVCPFeatureReply, PHYSICAL_MONITOR, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
@@ -144,8 +147,21 @@ fn enumerate() -> Vec<Physical> {
     out
 }
 
-/// GDI device name ("\\.\DISPLAY1") -> EDID friendly name ("AW3926QW").
-fn friendly_names() -> HashMap<String, String> {
+/// Whether a display connection is a laptop's built-in panel.
+fn is_builtin(tech: DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY) -> bool {
+    [
+        DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL,
+        DISPLAYCONFIG_OUTPUT_TECHNOLOGY_LVDS,
+        DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED,
+        DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED,
+    ]
+    .contains(&tech)
+}
+
+/// GDI device name ("\\.\DISPLAY1") -> (EDID friendly name ("AW3926QW"), built-in panel). A
+/// display mirrored to several screens counts as built-in only if all of them are, and is named
+/// after an external one.
+fn friendly_names() -> HashMap<String, (String, bool)> {
     let mut names = HashMap::new();
     for _ in 0..3 {
         let (mut path_count, mut mode_count) = (0u32, 0u32);
@@ -190,40 +206,59 @@ fn friendly_names() -> HashMap<String, String> {
             if unsafe { DisplayConfigGetDeviceInfo(&mut target.header) } != 0 {
                 continue;
             }
+            let entry = (
+                wide_to_string(&target.monitorFriendlyDeviceName),
+                is_builtin(path.targetInfo.outputTechnology),
+            );
             names
                 .entry(wide_to_string(&source.viewGdiDeviceName))
-                .or_insert_with(|| wide_to_string(&target.monitorFriendlyDeviceName));
+                .and_modify(|e| {
+                    if e.1 && !entry.1 {
+                        *e = entry.clone();
+                    }
+                })
+                .or_insert(entry);
         }
         return names;
     }
     names
 }
 
-/// All monitors Windows reports, including ones whose DDC/CI channel does not respond.
+/// All monitors Windows reports, including ones whose DDC/CI channel does not respond, except a
+/// laptop's built-in screen (it has no inputs to switch).
 pub fn list_displays() -> Result<Vec<DisplayInfo>, String> {
     let names = friendly_names();
+    let mut builtin = false;
     let displays: Vec<DisplayInfo> = enumerate()
         .into_iter()
-        .map(|mut p| {
+        .filter_map(|mut p| {
             let gdi = p.id.split('#').next().unwrap_or_default().to_string();
-            let model = names
-                .get(&gdi)
+            let target = names.get(&gdi);
+            if target.is_some_and(|t| t.1) {
+                builtin = true;
+                return None;
+            }
+            let model = target
+                .map(|t| t.0.clone())
                 .filter(|n| !n.is_empty())
-                .cloned()
                 .unwrap_or_else(|| p.description.clone());
             let valid = p.bus.get_vcp(INPUT_VCP).is_ok();
-            DisplayInfo {
+            Some(DisplayInfo {
                 bus: p.id,
                 model,
                 mfg: String::new(),
                 serial: String::new(),
                 connector: p.description,
                 valid,
-            }
+            })
         })
         .collect();
     if displays.is_empty() {
-        return Err("No monitor found".into());
+        return Err(if builtin {
+            "No external monitor found (the built-in screen is ignored)".into()
+        } else {
+            "No monitor found".into()
+        });
     }
     Ok(displays)
 }

@@ -325,8 +325,15 @@ fn connector_for(edid: &[u8]) -> String {
         .unwrap_or_default()
 }
 
+/// Whether a DRM connector ("card1-eDP-1") is a laptop's built-in panel.
+fn is_builtin(connector: &str) -> bool {
+    let kind = connector.split_once('-').map_or(connector, |(_, rest)| rest);
+    ["eDP-", "LVDS-", "DSI-"].iter().any(|p| kind.starts_with(p))
+}
+
 /// All displays with a readable EDID on a graphics adapter's I2C bus, including ones whose DDC/CI
-/// channel does not respond (valid = false).
+/// channel does not respond (valid = false), except a laptop's built-in screen (it has no inputs to
+/// switch).
 pub fn list_displays() -> Result<Vec<DisplayInfo>, String> {
     let buses = display_buses();
     if buses.is_empty() {
@@ -374,6 +381,10 @@ fn probe(bus: u32) -> Result<Option<DisplayInfo>, String> {
     let Some(edid) = read_edid(bus) else {
         return Ok(None);
     };
+    let connector = connector_for(&edid);
+    if is_builtin(&connector) {
+        return Ok(None);
+    }
     let info = parse_edid(&edid);
     let valid = Bus { bus, last: None }.get_vcp(INPUT_VCP).is_ok();
     Ok(Some(DisplayInfo {
@@ -381,7 +392,7 @@ fn probe(bus: u32) -> Result<Option<DisplayInfo>, String> {
         model: info.model,
         mfg: info.mfg,
         serial: info.serial,
-        connector: connector_for(&edid),
+        connector,
         valid,
     }))
 }
@@ -404,6 +415,16 @@ pub fn open(device: &str) -> Result<Bus, String> {
 mod tests {
     use super::*;
     use crate::ddc::matches;
+
+    #[test]
+    fn builtin_connectors() {
+        assert!(is_builtin("card1-eDP-1"));
+        assert!(is_builtin("card0-LVDS-1"));
+        assert!(is_builtin("card0-DSI-1"));
+        assert!(!is_builtin("card2-DP-8"));
+        assert!(!is_builtin("card1-HDMI-A-1"));
+        assert!(!is_builtin(""));
+    }
 
     #[test]
     fn packets() {

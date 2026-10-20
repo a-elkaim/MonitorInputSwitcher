@@ -1,9 +1,10 @@
 //! JSON config (the same schema on Linux and Windows) and the "Start with login" autostart entry.
 
+use crate::hotkey::Hotkey;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const APP_ID: &str = "monitor-input-switcher";
 pub const APP_NAME: &str = "Monitor Input Switcher";
@@ -138,14 +139,102 @@ impl AppConfig {
         }
     }
 
+    fn to_json(&self) -> io::Result<String> {
+        let mut text = serde_json::to_string_pretty(self).map_err(io::Error::other)?;
+        text.push('\n');
+        Ok(text)
+    }
+
     pub fn save(&self) -> io::Result<()> {
         let path = config_path();
         fs::create_dir_all(path.parent().unwrap())?;
         let tmp = path.with_extension("json.tmp");
-        let mut text = serde_json::to_string_pretty(self).map_err(io::Error::other)?;
-        text.push('\n');
-        fs::write(&tmp, text)?;
+        fs::write(&tmp, self.to_json()?)?;
         fs::rename(&tmp, &path)
+    }
+
+    /// Writes the settings to a file another machine can import (same format as config.json).
+    pub fn export(&self, path: &Path) -> Result<(), String> {
+        self.to_json()
+            .and_then(|text| fs::write(path, text))
+            .map_err(|e| format!("Could not write {}: {e}", path.display()))
+    }
+
+    /// Reads settings exported by `export` (or a copy of config.json), and checks them.
+    pub fn import(path: &Path) -> Result<AppConfig, String> {
+        let invalid = |e: String| format!("{} is not a valid settings file: {e}", path.display());
+        let read = |e: io::Error| format!("Could not read {}: {e}", path.display());
+        // A settings file is a few hundred bytes; don't load a big file picked by mistake.
+        if fs::metadata(path).map_err(read)?.len() > 1024 * 1024 {
+            return Err(invalid("it is larger than 1 MB".into()));
+        }
+        let text = fs::read_to_string(path).map_err(read)?;
+        Self::from_export(&text).map_err(invalid)
+    }
+
+    fn from_export(text: &str) -> Result<AppConfig, String> {
+        // Windows PowerShell and older Notepad start UTF-8 files with a byte order mark.
+        let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
+        let value: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        // Every field has a default, so any JSON object would parse: require the fields that
+        // carry the settings rather than silently filling them in.
+        let inputs = value
+            .get("Inputs")
+            .and_then(|v| v.as_array())
+            .ok_or("no \"Inputs\" list")?;
+        for (i, input) in inputs.iter().enumerate() {
+            for field in ["Name", "Value"] {
+                if input.get(field).is_none() {
+                    return Err(format!("input {} has no \"{field}\"", i + 1));
+                }
+            }
+        }
+        let mut config: AppConfig = serde_json::from_value(value).map_err(|e| e.to_string())?;
+        let blank = |h: &mut Option<String>| {
+            if h.as_deref().is_some_and(|t| t.trim().is_empty()) {
+                *h = None;
+            }
+        };
+        config.inputs.iter_mut().for_each(|e| blank(&mut e.hotkey));
+        blank(&mut config.toggle_hotkey);
+        config.check()?;
+        Ok(config)
+    }
+
+    /// Checks what a working config needs: at least one input, each with a name and an input code
+    /// in range, and valid shortcuts with no duplicates.
+    pub fn check(&self) -> Result<(), String> {
+        if self.inputs.is_empty() {
+            return Err("Add at least one input.".into());
+        }
+        let mut shortcuts = Vec::new();
+        for (i, e) in self.inputs.iter().enumerate() {
+            let name = e.name.trim();
+            if name.is_empty() {
+                return Err(format!("Input {} has no name.", i + 1));
+            }
+            if !(1..=0xFFFF).contains(&e.value) {
+                return Err(format!(
+                    "{name}: input code {} is out of range (1 to 65535).",
+                    e.value
+                ));
+            }
+            shortcuts.push((name.to_string(), &e.hotkey));
+        }
+        shortcuts.push(("Next input".into(), &self.toggle_hotkey));
+        let mut seen: Vec<Hotkey> = Vec::new();
+        for (owner, text) in shortcuts {
+            let Some(text) = text.as_deref().filter(|t| !t.trim().is_empty()) else {
+                continue;
+            };
+            let hotkey =
+                Hotkey::parse(text).ok_or_else(|| format!("{owner}: shortcut {text:?} is not valid."))?;
+            if seen.contains(&hotkey) {
+                return Err(format!("The shortcut {hotkey} is assigned more than once."));
+            }
+            seen.push(hotkey);
+        }
+        Ok(())
     }
 }
 
@@ -185,5 +274,52 @@ mod tests {
         assert!(cfg.inputs[0].include_in_next);
         let json = serde_json::to_string(&cfg).unwrap();
         assert!(json.contains(r#""IncludeInNext":true"#));
+    }
+
+    #[test]
+    fn export_round_trip() {
+        let mut cfg = AppConfig::default();
+        cfg.monitor_name = Some("AW3926QW".into());
+        cfg.inputs = inputs();
+        let text = cfg.to_json().unwrap();
+        assert_eq!(AppConfig::from_export(&text).unwrap(), cfg);
+        assert_eq!(AppConfig::from_export(&format!("\u{FEFF}{text}")).unwrap(), cfg);
+    }
+
+    #[test]
+    fn import_rejects_bad_files() {
+        let bad = [
+            "",
+            "not json",
+            "[1, 2]",
+            "{}",
+            r#"{"Inputs": "DP"}"#,
+            r#"{"Inputs": []}"#,
+            r#"{"Inputs": [{}]}"#,
+            r#"{"Inputs": [{"Name": "DP"}]}"#,
+            r#"{"Inputs": [{"Value": 15}]}"#,
+            r#"{"Inputs": [{"Name": " ", "Value": 15}]}"#,
+            r#"{"Inputs": [{"Name": "DP", "Value": "15"}]}"#,
+            r#"{"Inputs": [{"Name": "DP", "Value": -1}]}"#,
+            r#"{"Inputs": [{"Name": "DP", "Value": 0}]}"#,
+            r#"{"Inputs": [{"Name": "DP", "Value": 70000}]}"#,
+            r#"{"Inputs": [{"Name": "DP", "Value": 15, "Hotkey": "Ctrl+Banana"}]}"#,
+            r#"{"Inputs": [{"Name": "DP", "Value": 15, "Hotkey": "Ctrl+1"},
+                           {"Name": "HDMI", "Value": 17, "Hotkey": "ctrl+1"}]}"#,
+            r#"{"Inputs": [{"Name": "DP", "Value": 15, "Hotkey": "Ctrl+1"}], "ToggleHotkey": "Ctrl+1"}"#,
+            r#"{"Inputs": [{"Name": "DP", "Value": 15}], "ShowNotifications": "yes"}"#,
+            r#"{"Inputs": [{"Name": "DP", "Value": 15}"#,
+        ];
+        for text in bad {
+            assert!(AppConfig::from_export(text).is_err(), "accepted: {text}");
+        }
+        // Minimal and lenient: other fields default, unknown fields and blank shortcuts are ignored.
+        let ok = AppConfig::from_export(
+            r#"{"Inputs": [{"Name": "DP", "Value": 15, "Hotkey": ""}], "Extra": 1}"#,
+        )
+        .unwrap();
+        assert_eq!(ok.inputs[0].name, "DP");
+        assert_eq!(ok.inputs[0].hotkey, None);
+        assert!(ok.show_notifications);
     }
 }

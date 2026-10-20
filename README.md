@@ -62,7 +62,8 @@ window (egui) and the command line are shared; only the platform layer differs:
   you can add them by hand.
 - **Settings window:** monitor picker, editable inputs (name, VCP value, shortcut, "In Next", and a
   "Switch now" button to test), "Detect inputs", the next-input shortcut, start at login, and the
-  startup and switch notifications.
+  startup and switch notifications. **Export...** saves the settings to a file and **Import...**
+  loads one into the window (applied on Save), to set up another computer the same way.
 - **"Next input"** only cycles through inputs ticked **In Next** (`IncludeInNext`, on by default), so
   you can skip the ports with nothing plugged in. Sadly, a monitor can't be asked which inputs
   actually have a signal: DDC/CI has no standard command for it.
@@ -169,13 +170,16 @@ monitor-input-switcher get              # e.g. "6927 (0x1B0F) = DisplayPort"
 monitor-input-switcher list             # e.g. "AW3926QW  (/dev/i2c-20, card2-DP-8)"
 monitor-input-switcher capabilities     # model and input codes the monitor reports, plus the raw string
 monitor-input-switcher settings
+monitor-input-switcher export settings.json   # save the settings to a file
+monitor-input-switcher import settings.json   # replace the settings with an exported file
 monitor-input-switcher quit
 ```
 
 On Windows it's `monitor-input-switcher.exe`, from PowerShell or cmd. The commands go to the running
 app (over `$XDG_RUNTIME_DIR/monitor-input-switcher.sock` on Linux, a named pipe on Windows), so DDC
 operations never overlap. If the app isn't running, `switch`, `next`, `get` and `list` talk to the
-monitor directly.
+monitor directly. `export` and `import` work either way; `import` has a running app reload the new
+settings.
 
 ## Config
 
@@ -202,6 +206,9 @@ Both systems use the same JSON format:
 The standard codes are `0x0F`/`0x10` DisplayPort-1/2, `0x11`/`0x12` HDMI-1/2, `0x03`/`0x04` DVI-1/2
 and `0x01`/`0x02` VGA-1/2; `0x1B` is commonly USB-C. The Windows key is written `Win` on Windows and
 `Meta` on Linux; both are accepted.
+
+An exported settings file is this same JSON, so it can be imported on either system. "Start with
+login" isn't in it: that stays a per-computer choice.
 
 ## Under the hood
 

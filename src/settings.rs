@@ -9,6 +9,7 @@ use crate::hotkey::{DIGIT_ROW, Hotkey};
 use crate::ipc::{self, Request};
 use crate::platform::{self, ICON_PNG};
 use eframe::egui;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
 type Target = (Option<String>, Option<String>);
@@ -48,6 +49,31 @@ enum Msg {
     Current(Result<u32, String>),
     Tested(usize, Result<(), String>),
     Capabilities(Result<String, String>),
+    /// None: the file dialog was cancelled.
+    Exported(Result<Option<PathBuf>, String>),
+    Imported(Result<Option<(PathBuf, AppConfig)>, String>),
+}
+
+const EXPORT_FILE_NAME: &str = "monitor-input-switcher-settings.json";
+
+fn file_dialog(title: &str) -> rfd::FileDialog {
+    rfd::FileDialog::new()
+        .set_title(title)
+        .add_filter("Settings", &["json"])
+}
+
+fn rows_from(config: &AppConfig) -> Vec<Row> {
+    config
+        .inputs
+        .iter()
+        .map(|e| Row {
+            name: e.name.clone(),
+            value: e.value,
+            hotkey: Hotkey::parse_opt(&e.hotkey),
+            in_next: e.include_in_next,
+            testing: false,
+        })
+        .collect()
 }
 
 struct SettingsApp {
@@ -67,6 +93,10 @@ struct SettingsApp {
     /// Content height the window was last grown to fit (see `fit_to_content`).
     fitted_height: f32,
     error: Option<String>,
+    /// Outcome of the last import or export.
+    status: Option<String>,
+    /// An import or export file dialog is open.
+    file_dialog: bool,
     capture: Option<Capture>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -127,17 +157,7 @@ impl SettingsApp {
         let config = AppConfig::load_or_default();
         let (tx, rx) = mpsc::channel();
         let mut app = SettingsApp {
-            rows: config
-                .inputs
-                .iter()
-                .map(|e| Row {
-                    name: e.name.clone(),
-                    value: e.value,
-                    hotkey: Hotkey::parse_opt(&e.hotkey),
-                    in_next: e.include_in_next,
-                    testing: false,
-                })
-                .collect(),
+            rows: rows_from(&config),
             toggle: Hotkey::parse_opt(&config.toggle_hotkey),
             autostart: autostart::is_enabled(),
             notifications: config.show_notifications,
@@ -151,6 +171,8 @@ impl SettingsApp {
             detecting: false,
             fitted_height: 0.0,
             error: None,
+            status: None,
+            file_dialog: false,
             capture: None,
             tx,
             rx,
@@ -158,6 +180,51 @@ impl SettingsApp {
         app.fill_monitors(&[]);
         app.load_monitors(ctx);
         app
+    }
+
+    /// Shows imported settings in the form; they are applied on Save. "Start with login" is
+    /// per machine and not part of the file, so it stays as it is.
+    fn load_form(&mut self, config: AppConfig) {
+        self.set_capture(None);
+        self.rows = rows_from(&config);
+        self.toggle = Hotkey::parse_opt(&config.toggle_hotkey);
+        self.notifications = config.show_notifications;
+        self.startup_notification = config.show_startup_notification;
+        self.config = config;
+        let displays = self.displays.clone().unwrap_or_default();
+        self.fill_monitors(&displays);
+        self.inputs_text.clear();
+        self.current_text.clear();
+    }
+
+    fn export(&mut self, ctx: &egui::Context) {
+        let config = match self.form_config() {
+            Ok(c) => c,
+            Err(e) => {
+                self.error = Some(e);
+                return;
+            }
+        };
+        self.file_dialog = true;
+        self.spawn(ctx, move || {
+            let Some(path) = file_dialog("Export settings")
+                .set_file_name(EXPORT_FILE_NAME)
+                .save_file()
+            else {
+                return Msg::Exported(Ok(None));
+            };
+            Msg::Exported(config.export(&path).map(|()| Some(path)))
+        });
+    }
+
+    fn import(&mut self, ctx: &egui::Context) {
+        self.file_dialog = true;
+        self.spawn(ctx, || {
+            let Some(path) = file_dialog("Import settings").pick_file() else {
+                return Msg::Imported(Ok(None));
+            };
+            Msg::Imported(AppConfig::import(&path).map(|c| Some((path, c))))
+        });
     }
 
     fn spawn(&self, ctx: &egui::Context, job: impl FnOnce() -> Msg + Send + 'static) {
@@ -366,32 +433,10 @@ impl SettingsApp {
         );
     }
 
-    fn validate(&self) -> Result<(), String> {
-        if self.rows.is_empty() {
-            return Err("Add at least one input.".into());
-        }
-        if self.rows.iter().any(|r| r.name.trim().is_empty()) {
-            return Err("Every input needs a name.".into());
-        }
-        let all: Vec<&Hotkey> = self
-            .rows
-            .iter()
-            .filter_map(|r| r.hotkey.as_ref())
-            .chain(self.toggle.as_ref())
-            .collect();
-        if (1..all.len()).any(|i| all[..i].contains(&all[i])) {
-            return Err("The same shortcut is assigned more than once.".into());
-        }
-        Ok(())
-    }
-
-    fn save(&mut self, ctx: &egui::Context) {
-        if let Err(e) = self.validate() {
-            self.error = Some(e);
-            return;
-        }
+    /// The settings as currently shown in the form, checked the same way as an import.
+    fn form_config(&self) -> Result<AppConfig, String> {
         let (name, device) = self.target();
-        let cfg = &mut self.config;
+        let mut cfg = self.config.clone();
         cfg.monitor_name = name;
         cfg.monitor_device = device;
         cfg.inputs = self
@@ -407,7 +452,20 @@ impl SettingsApp {
         cfg.toggle_hotkey = self.toggle.as_ref().map(Hotkey::to_string);
         cfg.show_notifications = self.notifications;
         cfg.show_startup_notification = self.startup_notification;
-        if let Err(e) = cfg.save() {
+        cfg.check()?;
+        Ok(cfg)
+    }
+
+    fn save(&mut self, ctx: &egui::Context) {
+        let cfg = match self.form_config() {
+            Ok(c) => c,
+            Err(e) => {
+                self.error = Some(e);
+                return;
+            }
+        };
+        self.config = cfg;
+        if let Err(e) = self.config.save() {
             self.error = Some(format!("Could not save settings: {e}"));
             return;
         }
@@ -492,6 +550,32 @@ impl eframe::App for SettingsApp {
                         self.error = Some(format!("Switch failed: {e}"));
                     }
                 }
+                Msg::Exported(result) => {
+                    self.file_dialog = false;
+                    match result {
+                        Ok(Some(path)) => {
+                            self.error = None;
+                            self.status = Some(format!("Settings exported to {}", path.display()));
+                        }
+                        Ok(None) => {}
+                        Err(e) => self.error = Some(e),
+                    }
+                }
+                Msg::Imported(result) => {
+                    self.file_dialog = false;
+                    match result {
+                        Ok(Some((path, config))) => {
+                            self.load_form(config);
+                            self.error = None;
+                            self.status = Some(format!(
+                                "Imported {}. Review the settings, then click Save to apply them.",
+                                path.display()
+                            ));
+                        }
+                        Ok(None) => {}
+                        Err(e) => self.error = Some(e),
+                    }
+                }
             }
         }
         self.handle_capture(&ctx);
@@ -502,16 +586,36 @@ impl eframe::App for SettingsApp {
             ui.add_space(4.0);
             if let Some(e) = &self.error {
                 ui.colored_label(ui.visuals().error_fg_color, e);
+            } else if let Some(s) = &self.status {
+                ui.label(s);
             }
             // Align::Min, not Center: a centered row claims the whole height the panel offers, and
             // the auto-sized panel then grows a little every frame until it fills the window.
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                if ui.button("Cancel").clicked() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-                if ui.button("Save").clicked() {
-                    self.save(&ctx);
-                }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                ui.add_enabled_ui(!self.file_dialog, |ui| {
+                    if ui
+                        .button("Import...")
+                        .on_hover_text("Load settings exported from this or another computer")
+                        .clicked()
+                    {
+                        self.import(&ctx);
+                    }
+                    if ui
+                        .button("Export...")
+                        .on_hover_text("Save the settings shown here to a file")
+                        .clicked()
+                    {
+                        self.export(&ctx);
+                    }
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                    if ui.button("Cancel").clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if ui.button("Save").clicked() {
+                        self.save(&ctx);
+                    }
+                });
             });
             ui.add_space(4.0);
         });

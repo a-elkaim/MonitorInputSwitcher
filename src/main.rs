@@ -31,8 +31,33 @@ Commands:
   list             list detected displays
   capabilities     show the monitor's model and the input codes it accepts
   settings         open the Settings window of the running app
+  export <FILE>    save the settings to a file
+  import <FILE>    replace the settings with ones saved by export
   quit             stop the running app
   help             show this help";
+
+/// `export <FILE>` / `import <FILE>`: copies config.json out, or replaces it and has the running
+/// app (if any) reload it.
+fn transfer(cmd: &str, file: &str) -> Result<String, String> {
+    let path = std::path::Path::new(file);
+    if cmd == "export" {
+        let config = match AppConfig::load() {
+            config::Loaded::Ok(c) => c,
+            config::Loaded::FirstRun(_) => return Err("There are no settings to export yet".into()),
+            config::Loaded::Error(_, e) => return Err(e),
+        };
+        config.export(path)?;
+        return Ok(format!("Settings exported to {}", path.display()));
+    }
+    let config = AppConfig::import(path)?;
+    config
+        .save()
+        .map_err(|e| format!("Could not save settings: {e}"))?;
+    match ipc::send_cmd("reload") {
+        Some(r) if !r.ok => Err(format!("Settings imported, but the app could not reload them: {}", r.message)),
+        _ => Ok(format!("Settings imported from {}", path.display())),
+    }
+}
 
 /// The tray app isn't running: talk to the monitor directly.
 fn run_locally(cmd: &str, arg: &str) -> Result<String, String> {
@@ -88,6 +113,20 @@ fn main() {
             eprintln!("Usage: {APP_ID} switch <INPUT>");
             2
         }
+        "export" | "import" if arg.is_empty() => {
+            eprintln!("Usage: {APP_ID} {cmd} <FILE>");
+            2
+        }
+        "export" | "import" => match transfer(cmd, &arg) {
+            Ok(m) => {
+                println!("{m}");
+                0
+            }
+            Err(m) => {
+                eprintln!("{m}");
+                1
+            }
+        },
         "switch" | "next" | "get" | "list" | "capabilities" | "caps" | "settings" | "quit" => {
             let cmd = if cmd == "capabilities" { "caps" } else { cmd };
             let req = Request {

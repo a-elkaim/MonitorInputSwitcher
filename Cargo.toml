@@ -1,6 +1,6 @@
 [package]
 name = "monitor-input-switcher"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 description = "Switch the monitor input over DDC/CI from the system tray (Linux/KDE Plasma and Windows)"
 license = "GPL-3.0-or-later"

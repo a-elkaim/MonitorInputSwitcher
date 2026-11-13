@@ -11,9 +11,17 @@ found them cumbersome for something I want to do with a single key press. So I w
 lightweight and efficient approach: one small binary with no runtime or external tools, which talks
 to the monitor directly and switches in a fraction of a second.
 
-It runs on Windows, Linux (KDE Plasma) and macOS (Apple Silicon). I built and tested it on my own screen, but nothing in it
-is specific to that model: it should work with any monitor that implements DDC/CI. On first run it
-asks the monitor which inputs it has and sets itself up from that.
+It runs on Windows, Linux (KDE Plasma) and macOS (Apple Silicon). I built and tested it on my own
+screen, but nothing in it is specific to that model: it should work with any monitor that implements
+DDC/CI. On first run it asks the monitor which inputs it has and sets itself up from that.
+
+| System | Requirements | How to get it |
+|---|---|---|
+| Windows (x86_64) | None | [Download the exe](#download) or [build it](#install-on-windows) |
+| Linux, KDE Plasma (x86_64) | A one-time `sudo` setup for I2C access | [Download the archive](#download) or [build it](#install-on-linux-kde-plasma) |
+| macOS 11 or later, Apple Silicon (M1 and later) | Rust and the Xcode command line tools to build it. The monitor works best over USB-C or Thunderbolt. | [Build it with one script](#install-on-macos) (no download yet) |
+
+Intel Macs aren't supported.
 
 ## Screenshots
 
@@ -80,8 +88,10 @@ have it on by default, some hide it in a "System" or "Others" section.
 
 Ready-made binaries for Linux (x86_64) and Windows (x86_64) are on the
 [Releases page](https://github.com/a-elkaim/MonitorInputSwitcher/releases/latest). You can also build
-it yourself, see below. On macOS, build it from source (one command, see
-[Install on macOS](#install-on-macos)).
+it yourself, see below.
+
+**macOS has no ready-made download yet.** Build it from source instead, with one command, see
+[Install on macOS](#install-on-macos).
 
 ## Install on Linux (KDE Plasma)
 
@@ -211,8 +221,8 @@ On Windows it's `monitor-input-switcher.exe`, from PowerShell or cmd. On macOS i
 `~/.local/bin/monitor-input-switcher` after `./scripts/build-macos.sh --install` (the binary inside
 the app bundle). The commands go to the running app (over
 `$XDG_RUNTIME_DIR/monitor-input-switcher.sock` on Linux, `/tmp/monitor-input-switcher-<uid>/` on
-macOS, a named pipe on Windows), so DDC operations never overlap. If the app isn't running, `switch`, `next`, `get` and `list` talk to the
-monitor directly. `export` and `import` work either way; `import` has a running app reload the new
+macOS, a named pipe on Windows), so DDC operations never overlap. If the app isn't running,
+`switch`, `next`, `get` and `list` talk to the monitor directly. `export` and `import` work either way; `import` has a running app reload the new
 settings.
 
 ## Config
@@ -302,8 +312,14 @@ These come from my monitor; yours may behave differently, and the app tries not 
   on-screen menu, and on Linux with the NVIDIA driver see the note in the Linux install section.
 - **A shortcut does nothing**: another app may already use the key. On KDE, look for it in System
   Settings > Shortcuts; the app shows a notification when kglobalaccel refuses a shortcut. On
-  Windows, a notification lists the shortcuts that couldn't be registered. Shortcuts are released
-  while Settings is open, so it can record them.
+  Windows and macOS, a notification lists the shortcuts that couldn't be registered. Shortcuts are
+  released while Settings is open, so it can record them.
+- **No monitor found on macOS**: only external displays are used. If the monitor is connected over
+  the Mac's built-in HDMI port, try a USB-C or Thunderbolt connection. Some models, like the M1 Mac
+  mini, don't pass DDC/CI through HDMI.
+- **No notifications on macOS**: allow **Script Editor** in System Settings > Notifications.
+- **`monitor-input-switcher: command not found` on macOS**: add `~/.local/bin` to your `PATH`, or
+  run `"/Applications/Monitor Input Switcher.app/Contents/MacOS/monitor-input-switcher"` directly.
 - **Stuck modifier keys**: with the keyboard on the monitor's USB hub, switching unplugs it while
   Ctrl/Alt/Shift are still held. On Windows those keys stayed pressed, so on a shortcut press the
   app sends key-up events for any held modifier (`SendInput`), waits 30 ms, then switches. On Linux
@@ -322,10 +338,11 @@ cargo check --target x86_64-unknown-linux-gnu     # type-check the Linux build f
 
 To publish a release, bump `version` in `Cargo.toml`, commit, then push a matching tag:
 `git tag v1.0.0 && git push origin v1.0.0`. The `Release` workflow (`.github/workflows/release.yml`)
-builds and tests every system and attaches the binaries to a new GitHub release. To check that the
+builds and tests Linux and Windows and attaches the binaries to a new GitHub release. To check that the
 builds pass before tagging, run it by hand with `gh workflow run release.yml` (or Actions > Release >
 Run workflow): it builds and tests without publishing anything, and keeps the binaries as artifacts
-of the run.
+of the run. The workflow doesn't build macOS yet: build and test it on a Mac with
+`./scripts/build-macos.sh` and `cargo test`.
 
 ```
 src/                  shared code: config, daemon, Settings window, CLI, capabilities parsing

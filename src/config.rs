@@ -1,4 +1,5 @@
-//! JSON config (the same schema on Linux and Windows) and the "Start with login" autostart entry.
+//! JSON config (the same schema on Linux, Windows and macOS) and the "Start with login" autostart
+//! entry.
 
 use crate::hotkey::Hotkey;
 use serde::{Deserialize, Serialize};
@@ -87,9 +88,13 @@ impl Default for AppConfig {
 }
 
 /// This executable. After an upgrade replaced the file, /proc/self/exe reads "<path> (deleted)":
-/// the new binary at the same path is what we want then.
+/// the new binary at the same path is what we want then. On macOS, a symlink (the command line in
+/// ~/.local/bin) resolves to the binary inside the app bundle.
 pub fn self_exe() -> PathBuf {
     match std::env::current_exe() {
+        #[cfg(target_os = "macos")]
+        Ok(p) => p.canonicalize().unwrap_or(p),
+        #[cfg(not(target_os = "macos"))]
         Ok(p) => {
             let s = p.display().to_string();
             s.strip_suffix(" (deleted)").map(PathBuf::from).unwrap_or(p)
@@ -99,7 +104,8 @@ pub fn self_exe() -> PathBuf {
 }
 
 /// `~/.config/monitor-input-switcher/config.json` on Linux,
-/// `%APPDATA%\MonitorInputSwitcher\config.json` on Windows.
+/// `%APPDATA%\MonitorInputSwitcher\config.json` on Windows,
+/// `~/Library/Application Support/MonitorInputSwitcher/config.json` on macOS.
 pub fn config_path() -> PathBuf {
     crate::platform::config_dir().join("config.json")
 }

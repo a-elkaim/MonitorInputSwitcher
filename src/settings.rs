@@ -313,7 +313,9 @@ impl SettingsApp {
             else {
                 continue;
             };
-            let plain = !(modifiers.ctrl || modifiers.alt || modifiers.shift);
+            // Command counts as the Windows key on a Mac (Cmd), and is ignored elsewhere.
+            let meta = cfg!(target_os = "macos") && modifiers.mac_cmd;
+            let plain = !(modifiers.ctrl || modifiers.alt || modifiers.shift || meta);
             let slot = match capture {
                 Capture::Row(i) => match self.rows.get_mut(i) {
                     Some(r) => &mut r.hotkey,
@@ -336,7 +338,13 @@ impl SettingsApp {
                         .and_then(|p| PUNCTUATION_SCANCODES.iter().find(|(k, _)| *k == p))
                         .and_then(|(_, code)| platform::layout_char(*code))
                         .map(String::from);
+                    // macOS hotkeys are by key position, and Option turns letters into other
+                    // characters ("Option+S" types "ß"): record letters by position too.
+                    let letter = physical_key
+                        .map(|k| k.name())
+                        .filter(|n| cfg!(target_os = "macos") && n.len() == 1 && n.as_bytes()[0].is_ascii_uppercase());
                     let raw = digit
+                        .or(letter)
                         .map(str::to_string)
                         .or(punctuation)
                         .unwrap_or_else(|| key.name().to_string());
@@ -347,7 +355,7 @@ impl SettingsApp {
                         ctrl: modifiers.ctrl,
                         alt: modifiers.alt,
                         shift: modifiers.shift,
-                        meta: false,
+                        meta,
                         key: name,
                     });
                 }

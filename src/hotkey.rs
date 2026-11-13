@@ -68,7 +68,7 @@ pub struct Hotkey {
     pub ctrl: bool,
     pub alt: bool,
     pub shift: bool,
-    /// The Windows/Super key ("Meta" on Linux, "Win" on Windows).
+    /// The Windows/Super key ("Meta" on Linux, "Win" on Windows, "Cmd" on macOS).
     pub meta: bool,
     /// "1", "S", "F5", "PgUp", ...
     pub key: String,
@@ -119,7 +119,8 @@ pub fn canonical_key(raw: &str) -> Option<String> {
 }
 
 impl Hotkey {
-    /// Parses "Ctrl+Alt+Shift+1" ("Win", "Meta" and "Super" all mean the Windows key).
+    /// Parses "Ctrl+Alt+Shift+1" ("Win", "Meta", "Super" and "Cmd" all mean the Windows key, which
+    /// is Command on a Mac; "Option" is Alt).
     /// None if empty or invalid.
     pub fn parse(text: &str) -> Option<Hotkey> {
         let text = text.trim();
@@ -141,9 +142,9 @@ impl Hotkey {
         for raw in parts.into_iter().filter(|p| !p.is_empty()) {
             match raw.to_lowercase().as_str() {
                 "ctrl" | "control" => hk.ctrl = true,
-                "alt" => hk.alt = true,
+                "alt" | "option" | "opt" => hk.alt = true,
                 "shift" => hk.shift = true,
-                "meta" | "win" | "windows" | "super" => hk.meta = true,
+                "meta" | "win" | "windows" | "super" | "cmd" | "command" => hk.meta = true,
                 _ if hk.key.is_empty() => hk.key = canonical_key(raw)?,
                 _ => return None,
             }
@@ -156,7 +157,7 @@ impl Hotkey {
     }
 
     /// The digit-row position (0 for "1" ... 9 for "0"), if the key is a digit.
-    #[cfg_attr(windows, allow(dead_code))] // used by the KDE backend
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))] // used by the KDE backend
     pub fn digit_index(&self) -> Option<usize> {
         let mut chars = self.key.chars();
         match (chars.next(), chars.next()) {

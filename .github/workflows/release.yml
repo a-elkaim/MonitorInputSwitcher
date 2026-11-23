@@ -39,6 +39,12 @@ jobs:
             exit 1
           fi
 
+      # The tag (v1.2.0), or the branch for a run started by hand, with "/" replaced so it can be
+      # part of a file name.
+      - name: Name the packages
+        shell: bash
+        run: echo "LABEL=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+
       - name: Install Rust
         shell: bash
         run: rustup update stable && rustup default stable
@@ -57,7 +63,7 @@ jobs:
       - name: Package (Linux)
         if: matrix.name == 'linux'
         run: |
-          dir=monitor-input-switcher-${GITHUB_REF_NAME}-linux-x86_64
+          dir=monitor-input-switcher-${LABEL}-linux-x86_64
           mkdir -p "$dir/target/release" "$dir/assets" "$dir/scripts"
           cp target/release/monitor-input-switcher "$dir/target/release/"
           cp assets/icon-256.png "$dir/assets/"
@@ -68,7 +74,7 @@ jobs:
       - name: Package (Windows)
         if: matrix.name == 'windows'
         shell: bash
-        run: cp target/release/monitor-input-switcher.exe "monitor-input-switcher-${GITHUB_REF_NAME}-windows-x86_64.exe"
+        run: cp target/release/monitor-input-switcher.exe "monitor-input-switcher-${LABEL}-windows-x86_64.exe"
 
       # The ad-hoc signed .app bundle, zipped with ditto so the signature and permissions survive.
       - name: Package (macOS)
@@ -76,7 +82,7 @@ jobs:
         run: |
           ./scripts/build-macos.sh
           ditto -c -k --keepParent "target/release/Monitor Input Switcher.app" \
-            "monitor-input-switcher-${GITHUB_REF_NAME}-macos-arm64.zip"
+            "monitor-input-switcher-${LABEL}-macos-arm64.zip"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -85,6 +91,7 @@ jobs:
             monitor-input-switcher-*.tar.gz
             monitor-input-switcher-*.exe
             monitor-input-switcher-*.zip
+          if-no-files-found: error
 
   release:
     needs: build

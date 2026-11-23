@@ -15,7 +15,7 @@ pub const INPUT_VCP: u8 = 0x60;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct DisplayInfo {
-    pub bus: String,   // device id: "/dev/i2c-20" (Linux) or "\\\\.\\DISPLAY1" (Windows)
+    pub bus: String,   // device id: "/dev/i2c-20" (Linux), "\\\\.\\DISPLAY1" (Windows) or "dispext0" (macOS)
     pub model: String, // EDID model name, e.g. "AW3926QW"
     pub mfg: String,
     pub serial: String,
@@ -165,8 +165,8 @@ pub fn input_name(value: u32) -> String {
 /// The configured monitor, resolved to a DDC channel once and cached; re-detected after a failure.
 pub struct Monitor {
     pub name: Option<String>,
-    /// Platform device id ("/dev/i2c-20" on Linux, "\\.\DISPLAY1" on Windows); one from the
-    /// other OS is ignored.
+    /// Platform device id ("/dev/i2c-20" on Linux, "\\.\DISPLAY1" on Windows, "dispext0" on
+    /// macOS); one from another OS is ignored.
     pub device: Option<String>,
     channel: Option<Bus>,
 }

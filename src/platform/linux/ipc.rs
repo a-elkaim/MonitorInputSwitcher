@@ -1,5 +1,8 @@
 //! Single instance: an flock on $XDG_RUNTIME_DIR/monitor-input-switcher.lock.
 //! CLI transport: a Unix socket next to it.
+//!
+//! macOS uses this file too. It has no $XDG_RUNTIME_DIR, so both live in
+//! /tmp/monitor-input-switcher-<uid>/.
 
 use crate::config::APP_ID;
 use std::fs::File;

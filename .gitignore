@@ -1,4 +1,4 @@
-# Rust build output (Linux and Windows)
+# Rust build output (and the macOS app bundle, built inside it)
 /target/
 **/*.rs.bk
 

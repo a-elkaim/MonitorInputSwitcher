@@ -2,7 +2,7 @@
 name = "monitor-input-switcher"
 version = "1.1.0"
 edition = "2024"
-description = "Switch the monitor input over DDC/CI from the system tray (Linux/KDE Plasma and Windows)"
+description = "Switch the monitor input over DDC/CI from the system tray (Linux/KDE Plasma, Windows and macOS)"
 license = "GPL-3.0-or-later"
 
 [dependencies]
@@ -21,6 +21,28 @@ ksni = { version = "0.3", default-features = false, features = ["blocking", "asy
 libc = "0.2"
 xkbcommon = { version = "0.9", default-features = false }
 zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSString", "NSObject"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSButton",
+    "NSCell",
+    "NSControl",
+    "NSEvent",
+    "NSImage",
+    "NSMenu",
+    "NSMenuItem",
+    "NSResponder",
+    "NSRunningApplication",
+    "NSStatusBar",
+    "NSStatusBarButton",
+    "NSStatusItem",
+    "NSView",
+] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

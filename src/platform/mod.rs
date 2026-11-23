@@ -1,5 +1,5 @@
-//! Everything that differs between Linux and Windows lives behind this module. Each OS module
-//! provides the same items:
+//! Everything that differs between Linux, Windows and macOS lives behind this module. Each OS
+//! module provides the same items:
 //!
 //! - `Ui`: tray icon + menu, notifications, and global shortcuts
 //!   (`start`, `update`, `notify`, `register_shortcuts`, `suspend_shortcuts`, `shutdown`)
@@ -19,6 +19,15 @@ pub use linux::*;
 mod windows;
 #[cfg(windows)]
 pub use windows::*;
+
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::*;
+
+/// The DDC/CI protocol for the backends that do raw I2C.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod ddcci;
 
 /// What the tray menu shows.
 #[derive(Clone, Debug, Default)]
@@ -42,7 +51,7 @@ pub enum UiEvent {
     /// A global shortcut was pressed (action id).
     Hotkey(String),
     /// The user changed a shortcut outside the app (KDE System Settings).
-    #[cfg_attr(windows, allow(dead_code))]
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     HotkeyChanged(String, Option<Hotkey>),
 }
 

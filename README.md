@@ -11,9 +11,17 @@ found them cumbersome for something I want to do with a single key press. So I w
 lightweight and efficient approach: one small binary with no runtime or external tools, which talks
 to the monitor directly and switches in a fraction of a second.
 
-It runs on Windows and Linux (KDE Plasma). I built and tested it on my own screen, but nothing in it
-is specific to that model: it should work with any monitor that implements DDC/CI. On first run it
-asks the monitor which inputs it has and sets itself up from that.
+It runs on Windows, Linux (KDE Plasma) and macOS (Apple Silicon). I built and tested it on my own
+screen, but nothing in it is specific to that model: it should work with any monitor that implements
+DDC/CI. On first run it asks the monitor which inputs it has and sets itself up from that.
+
+| System | Requirements | How to get it |
+|---|---|---|
+| Windows (x86_64) | None | [Download the exe](#download) or [build it](#install-on-windows) |
+| Linux, KDE Plasma (x86_64) | A one-time `sudo` setup for I2C access | [Download the archive](#download) or [build it](#install-on-linux-kde-plasma) |
+| macOS 11 or later, Apple Silicon (M1 and later) | Rust and the Xcode command line tools to build it. The monitor works best over USB-C or Thunderbolt. | [Build it with one script](#install-on-macos) (no download yet) |
+
+Intel Macs aren't supported.
 
 ## Screenshots
 
@@ -37,22 +45,23 @@ other one.
 Everything lives in one Rust codebase. The config, automatic setup, "Next input", the Settings
 window (egui) and the command line are shared; only the platform layer differs:
 
-| | Linux (KDE Plasma) | Windows |
-|---|---|---|
-| DDC/CI | Raw I2C on `/dev/i2c-N` (no external tool) | Monitor Configuration API (`dxva2.dll`) |
-| Global shortcuts | KDE `kglobalaccel` (works on Wayland) | `RegisterHotKey` |
-| Tray and notifications | StatusNotifierItem + desktop notifications | `Shell_NotifyIcon` + balloons |
-| Starts at login | `~/.config/autostart/` | `HKCU\...\Run` |
-| Single instance, CLI transport | `flock` + Unix socket | named mutex + named pipe |
-| Config | `~/.config/monitor-input-switcher/config.json` | `%APPDATA%\MonitorInputSwitcher\config.json` |
+| | Linux (KDE Plasma) | Windows | macOS (Apple Silicon) |
+|---|---|---|---|
+| DDC/CI | Raw I2C on `/dev/i2c-N` (no external tool) | Monitor Configuration API (`dxva2.dll`) | Raw I2C through `IOAVService` (no external tool) |
+| Global shortcuts | KDE `kglobalaccel` (works on Wayland) | `RegisterHotKey` | Carbon `RegisterEventHotKey` (no Accessibility permission needed) |
+| Tray and notifications | StatusNotifierItem + desktop notifications | `Shell_NotifyIcon` + balloons | Menu bar item (`NSStatusItem`) + notifications through `osascript` |
+| Starts at login | `~/.config/autostart/` | `HKCU\...\Run` | `~/Library/LaunchAgents/` |
+| Single instance, CLI transport | `flock` + Unix socket | named mutex + named pipe | `flock` + Unix socket |
+| Config | `~/.config/monitor-input-switcher/config.json` | `%APPDATA%\MonitorInputSwitcher\config.json` | `~/Library/Application Support/MonitorInputSwitcher/config.json` |
 
 ## What it does
 
-- **Tray menu** (left- or right-click the icon): the monitor's name, one item per input (the
-  current one is checked, with its shortcut next to it), Next input, Settings..., Start with login
-  (Start with Windows on Windows), and Exit.
+- **Tray menu** (left- or right-click the icon; on macOS, the display icon in the menu bar): the
+  monitor's name, one item per input (the current one is checked, with its shortcut next to it),
+  Next input, Settings..., Start with login (Start with Windows on Windows, Open at Login on
+  macOS), and Exit.
 - **Global shortcuts**, changeable in Settings: `Ctrl+Alt+Shift+1`, `+2`, … for the inputs in order,
-  and `Ctrl+Alt+Shift+S` for the next input. On KDE they also show up in
+  and `Ctrl+Alt+Shift+S` for the next input (on a Mac, Alt is the Option key: `⌃⌥⇧1`). On KDE they also show up in
   System Settings > Keyboard > Shortcuts > Monitor Input Switcher, and both places stay in sync.
 - **Automatic setup:** on first run (or whenever no input is configured) the app finds the connected
   monitor, reads the input codes it supports from its DDC/CI capabilities, and creates one input per
@@ -80,6 +89,9 @@ have it on by default, some hide it in a "System" or "Others" section.
 Ready-made binaries for Linux (x86_64) and Windows (x86_64) are on the
 [Releases page](https://github.com/a-elkaim/MonitorInputSwitcher/releases/latest). You can also build
 it yourself, see below.
+
+**macOS has no ready-made download yet.** Build it from source instead, with one command, see
+[Install on macOS](#install-on-macos).
 
 ## Install on Linux (KDE Plasma)
 
@@ -134,6 +146,36 @@ the install stops the running copy before replacing it.
 Start at login is the file `~/.config/autostart/monitor-input-switcher.desktop`; the menu toggle
 creates or deletes it.
 
+## Install on macOS
+
+Apple Silicon Macs (M1 and later) only: Intel Macs talk to monitors through a different API that
+the app doesn't implement.
+
+You'll need [Rust](https://rustup.rs) and the Xcode command line tools (`xcode-select --install`).
+From the repository root:
+
+```bash
+./scripts/build-macos.sh              # builds "target/release/Monitor Input Switcher.app"
+./scripts/build-macos.sh --install    # also copies it to /Applications, links the command line
+                                      # to ~/.local/bin/monitor-input-switcher, and starts it
+```
+
+The app lives in the menu bar (a display icon) and has no Dock icon. On first run it sets itself
+up for the connected monitor and turns on "Open at Login", which is the file
+`~/Library/LaunchAgents/io.github.monitor-input-switcher.plist`; macOS shows a "Background Items
+Added" notice when it's created. To update, run `./scripts/build-macos.sh --install` again: it
+quits the running copy first. To uninstall, choose Quit in its menu, then delete the app, the
+LaunchAgent file, `~/.local/bin/monitor-input-switcher` and
+`~/Library/Application Support/MonitorInputSwitcher`.
+
+Notes:
+- Notifications go through AppleScript, so macOS lists them under **Script Editor** in
+  System Settings > Notifications. Allow it there if they don't show.
+- The built-in screen is ignored (it has no inputs). Monitors are identified by the port they're
+  on (`dispext0`, `dispext1`, …) and their EDID model name.
+- DDC/CI over a Mac's built-in HDMI port doesn't work on some models (the M1 Mac mini, for
+  example); USB-C and Thunderbolt connections do.
+
 ## Install on Windows
 
 The easiest way: download `monitor-input-switcher-<version>-windows-x86_64.exe` from the
@@ -175,15 +217,17 @@ monitor-input-switcher import settings.json   # replace the settings with an exp
 monitor-input-switcher quit
 ```
 
-On Windows it's `monitor-input-switcher.exe`, from PowerShell or cmd. The commands go to the running
-app (over `$XDG_RUNTIME_DIR/monitor-input-switcher.sock` on Linux, a named pipe on Windows), so DDC
-operations never overlap. If the app isn't running, `switch`, `next`, `get` and `list` talk to the
-monitor directly. `export` and `import` work either way; `import` has a running app reload the new
+On Windows it's `monitor-input-switcher.exe`, from PowerShell or cmd. On macOS it's
+`~/.local/bin/monitor-input-switcher` after `./scripts/build-macos.sh --install` (the binary inside
+the app bundle). The commands go to the running app (over
+`$XDG_RUNTIME_DIR/monitor-input-switcher.sock` on Linux, `/tmp/monitor-input-switcher-<uid>/` on
+macOS, a named pipe on Windows), so DDC operations never overlap. If the app isn't running,
+`switch`, `next`, `get` and `list` talk to the monitor directly. `export` and `import` work either way; `import` has a running app reload the new
 settings.
 
 ## Config
 
-Both systems use the same JSON format:
+Every system uses the same JSON format:
 
 ```json
 {
@@ -201,11 +245,12 @@ Both systems use the same JSON format:
 ```
 
 `MonitorName` is matched against the EDID model name. `MonitorDevice` optionally narrows the match:
-`\\.\DISPLAY1` on Windows, `/dev/i2c-N` on Linux (a value from the other OS is ignored). With no
+`\\.\DISPLAY1` on Windows, `/dev/i2c-N` on Linux, `dispext0` on macOS (a value from another OS is
+ignored). With no
 `MonitorName`, the only (or first) DDC/CI monitor is used. `Value` is the MCCS input code (VCP `0x60`).
 The standard codes are `0x0F`/`0x10` DisplayPort-1/2, `0x11`/`0x12` HDMI-1/2, `0x03`/`0x04` DVI-1/2
-and `0x01`/`0x02` VGA-1/2; `0x1B` is commonly USB-C. The Windows key is written `Win` on Windows and
-`Meta` on Linux; both are accepted.
+and `0x01`/`0x02` VGA-1/2; `0x1B` is commonly USB-C. The Windows key is written `Win` on Windows,
+`Meta` on Linux and `Cmd` (Command) on macOS; all are accepted, and `Option` is accepted for `Alt`.
 
 An exported settings file is this same JSON, so it can be imported on either system. "Start with
 login" isn't in it: that stays a per-computer choice.
@@ -239,6 +284,18 @@ keys are recorded by position, as on Windows.
 Punctuation keys, on both systems, are recorded as the character your layout puts on them: the key
 left of `1` is saved as `²` on a French layout and as `` ` `` on a US one.
 
+### DDC/CI on macOS
+
+Apple Silicon has no I2C device files, but the private `IOAVService` API in IOKit sends raw I2C
+to a display. MonitorControl, m1ddc and BetterDisplay use it too.
+
+| Piece | Implementation |
+|---|---|
+| DDC/CI | `IOAVServiceWriteI2C` / `IOAVServiceReadI2C` to address `0x37` with `0x51` as the register, then the same packets, timing and retries as on Linux (the protocol code is shared, in `src/platform/ddcci.rs`). |
+| Detection | Walks the IORegistry: each framebuffer (`AppleCLCD2`) gives the EDID model name from its `DisplayAttributes`, and the `DCPAVServiceProxy` after it with `"Location" = "External"` is its DDC channel. The built-in screen's proxy says `"Embedded"` and is skipped. |
+| Shortcuts | Carbon `RegisterEventHotKey`, by key position on the ANSI layout. It needs no Accessibility permission. As on Windows, they're released while Settings is open so it can record them. |
+| Threads | AppKit owns the main thread; the app's event loop runs on another one and drives the menu by dispatching to the main queue. |
+
 ### Quirks I ran into
 
 These come from my monitor; yours may behave differently, and the app tries not to depend on them.
@@ -255,36 +312,46 @@ These come from my monitor; yours may behave differently, and the app tries not 
   on-screen menu, and on Linux with the NVIDIA driver see the note in the Linux install section.
 - **A shortcut does nothing**: another app may already use the key. On KDE, look for it in System
   Settings > Shortcuts; the app shows a notification when kglobalaccel refuses a shortcut. On
-  Windows, a notification lists the shortcuts that couldn't be registered. Shortcuts are released
-  while Settings is open, so it can record them.
+  Windows and macOS, a notification lists the shortcuts that couldn't be registered. Shortcuts are
+  released while Settings is open, so it can record them.
+- **No monitor found on macOS**: only external displays are used. If the monitor is connected over
+  the Mac's built-in HDMI port, try a USB-C or Thunderbolt connection. Some models, like the M1 Mac
+  mini, don't pass DDC/CI through HDMI.
+- **No notifications on macOS**: allow **Script Editor** in System Settings > Notifications.
+- **`monitor-input-switcher: command not found` on macOS**: add `~/.local/bin` to your `PATH`, or
+  run `"/Applications/Monitor Input Switcher.app/Contents/MacOS/monitor-input-switcher"` directly.
 - **Stuck modifier keys**: with the keyboard on the monitor's USB hub, switching unplugs it while
   Ctrl/Alt/Shift are still held. On Windows those keys stayed pressed, so on a shortcut press the
   app sends key-up events for any held modifier (`SendInput`), waits 30 ms, then switches. On Linux
   the kernel removes the keyboard's input device and libinput/KWin release every key held on it, so
   the app switches immediately. If modifiers ever do stick, please report it.
-- **See the logs** (Linux): run it from a terminal with
+- **See the logs** (Linux and macOS): run it from a terminal with
   `monitor-input-switcher quit; monitor-input-switcher`.
 
 ## Development
 
 ```
 cargo test                                        # unit tests
-cargo check --target x86_64-pc-windows-msvc       # type-check the Windows build from Linux
+cargo check --target x86_64-pc-windows-msvc       # type-check the Windows build from Linux or macOS
+cargo check --target x86_64-unknown-linux-gnu     # type-check the Linux build from macOS
 ```
 
 To publish a release, bump `version` in `Cargo.toml`, commit, then push a matching tag:
 `git tag v1.0.0 && git push origin v1.0.0`. The `Release` workflow (`.github/workflows/release.yml`)
-builds and tests both systems and attaches the binaries to a new GitHub release. To check that both
+builds and tests Linux and Windows and attaches the binaries to a new GitHub release. To check that the
 builds pass before tagging, run it by hand with `gh workflow run release.yml` (or Actions > Release >
 Run workflow): it builds and tests without publishing anything, and keeps the binaries as artifacts
-of the run.
+of the run. The workflow doesn't build macOS yet: build and test it on a Mac with
+`./scripts/build-macos.sh` and `cargo test`.
 
 ```
 src/                  shared code: config, daemon, Settings window, CLI, capabilities parsing
 src/platform/linux/   I2C DDC/CI, kglobalaccel + keyboard layouts, StatusNotifierItem tray, Unix socket
 src/platform/windows/ dxva2 DDC/CI, RegisterHotKey, Shell_NotifyIcon tray, named pipe, Run key
+src/platform/macos/   IOAVService DDC/CI, Carbon hotkeys, NSStatusItem menu, LaunchAgent (Unix socket shared with Linux)
+src/platform/ddcci.rs the DDC/CI packets shared by Linux and macOS
 assets/               icons (PNG for the tray and windows, ICO embedded in the Windows exe)
-scripts/              build.sh / build.bat, plus the Linux install / uninstall / one-time system setup scripts
+scripts/              build.sh / build.bat / build-macos.sh, plus the Linux install / uninstall / one-time system setup scripts
 docs/screenshots/     the screenshots above
 .github/workflows/    the release workflow
 ```

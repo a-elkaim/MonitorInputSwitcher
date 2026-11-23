@@ -14,12 +14,14 @@ to the monitor directly and switches in a fraction of a second.
 It runs on Windows, Linux (KDE Plasma) and macOS (Apple Silicon). I built and tested it on my own
 screen, but nothing in it is specific to that model: it should work with any monitor that implements
 DDC/CI. On first run it asks the monitor which inputs it has and sets itself up from that.
+macOS support was contributed by [Daniel Nadkin](https://github.com/daniel-keen)
+([#1](https://github.com/a-elkaim/MonitorInputSwitcher/pull/1)).
 
 | System | Requirements | How to get it |
 |---|---|---|
 | Windows (x86_64) | None | [Download the exe](#download) or [build it](#install-on-windows) |
 | Linux, KDE Plasma (x86_64) | A one-time `sudo` setup for I2C access | [Download the archive](#download) or [build it](#install-on-linux-kde-plasma) |
-| macOS 11 or later, Apple Silicon (M1 and later) | Rust and the Xcode command line tools to build it. The monitor works best over USB-C or Thunderbolt. | [Build it with one script](#install-on-macos) (no download yet) |
+| macOS 11 or later, Apple Silicon (M1 and later) | None. The monitor works best over USB-C or Thunderbolt. | [Download the app](#download) or [build it with one script](#install-on-macos) |
 
 Intel Macs aren't supported.
 
@@ -59,10 +61,11 @@ window (egui) and the command line are shared; only the platform layer differs:
 - **Tray menu** (left- or right-click the icon; on macOS, the display icon in the menu bar): the
   monitor's name, one item per input (the current one is checked, with its shortcut next to it),
   Next input, Settings..., Start with login (Start with Windows on Windows, Open at Login on
-  macOS), and Exit.
+  macOS), and Exit (Quit Monitor Input Switcher on macOS).
 - **Global shortcuts**, changeable in Settings: `Ctrl+Alt+Shift+1`, `+2`, … for the inputs in order,
-  and `Ctrl+Alt+Shift+S` for the next input (on a Mac, Alt is the Option key: `⌃⌥⇧1`). On KDE they also show up in
-  System Settings > Keyboard > Shortcuts > Monitor Input Switcher, and both places stay in sync.
+  and `Ctrl+Alt+Shift+S` for the next input. On a Mac, Ctrl is Control and Alt is Option (`⌃⌥⇧1`),
+  and shortcuts can also use Command (`Cmd`). On KDE they also show up in System Settings >
+  Keyboard > Shortcuts > Monitor Input Switcher, and both places stay in sync.
 - **Automatic setup:** on first run (or whenever no input is configured) the app finds the connected
   monitor, reads the input codes it supports from its DDC/CI capabilities, and creates one input per
   code, named from the MCCS standard (DisplayPort, HDMI-1, USB-C, …). On mine that gives
@@ -79,6 +82,8 @@ window (egui) and the command line are shared; only the platform layer differs:
 - **Notifications:** one when the app starts, so you know it's running even when the tray icon is
   tucked away in the hidden icons (it can be turned off in Settings, except on the very first run).
   Also one after each switch (optional), and on errors (always).
+- **Built-in screens are ignored:** a laptop's own panel has no inputs to switch, so it's left out
+  of the monitor list on every system.
 - Only one instance runs, and it turns on start-at-login the first time it runs.
 
 Before anything else, make sure DDC/CI is turned on in your monitor's on-screen menu. Most monitors
@@ -86,12 +91,9 @@ have it on by default, some hide it in a "System" or "Others" section.
 
 ## Download
 
-Ready-made binaries for Linux (x86_64) and Windows (x86_64) are on the
+Ready-made binaries for Linux (x86_64), Windows (x86_64) and macOS (Apple Silicon) are on the
 [Releases page](https://github.com/a-elkaim/MonitorInputSwitcher/releases/latest). You can also build
 it yourself, see below.
-
-**macOS has no ready-made download yet.** Build it from source instead, with one command, see
-[Install on macOS](#install-on-macos).
 
 ## Install on Linux (KDE Plasma)
 
@@ -151,6 +153,30 @@ creates or deletes it.
 Apple Silicon Macs (M1 and later) only: Intel Macs talk to monitors through a different API that
 the app doesn't implement.
 
+### Download the app
+
+Download `monitor-input-switcher-<version>-macos-arm64.zip` from the
+[latest release](https://github.com/a-elkaim/MonitorInputSwitcher/releases/latest), unzip it and move
+`Monitor Input Switcher.app` to `/Applications`. The app isn't notarized by Apple, so macOS refuses
+to open it the first time. Either clear the download flag once from a terminal:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Monitor Input Switcher.app"
+```
+
+or try to open it, then go to System Settings > Privacy & Security and click "Open Anyway".
+
+For the command line, link it into your `PATH`:
+
+```bash
+mkdir -p ~/.local/bin
+ln -sf "/Applications/Monitor Input Switcher.app/Contents/MacOS/monitor-input-switcher" ~/.local/bin/
+```
+
+To update, choose Quit in its menu and replace the app with the newer one.
+
+### Build it yourself
+
 You'll need [Rust](https://rustup.rs) and the Xcode command line tools (`xcode-select --install`).
 From the repository root:
 
@@ -163,10 +189,10 @@ From the repository root:
 The app lives in the menu bar (a display icon) and has no Dock icon. On first run it sets itself
 up for the connected monitor and turns on "Open at Login", which is the file
 `~/Library/LaunchAgents/io.github.monitor-input-switcher.plist`; macOS shows a "Background Items
-Added" notice when it's created. To update, run `./scripts/build-macos.sh --install` again: it
-quits the running copy first. To uninstall, choose Quit in its menu, then delete the app, the
-LaunchAgent file, `~/.local/bin/monitor-input-switcher` and
-`~/Library/Application Support/MonitorInputSwitcher`.
+Added" notice when it's created. To update a build from source, run
+`./scripts/build-macos.sh --install` again: it quits the running copy first. To uninstall, choose
+Quit in its menu, then delete the app, the LaunchAgent file, `~/.local/bin/monitor-input-switcher`
+and `~/Library/Application Support/MonitorInputSwitcher`.
 
 Notes:
 - Notifications go through AppleScript, so macOS lists them under **Script Editor** in
@@ -218,8 +244,8 @@ monitor-input-switcher quit
 ```
 
 On Windows it's `monitor-input-switcher.exe`, from PowerShell or cmd. On macOS it's
-`~/.local/bin/monitor-input-switcher` after `./scripts/build-macos.sh --install` (the binary inside
-the app bundle). The commands go to the running app (over
+`~/.local/bin/monitor-input-switcher` after `./scripts/build-macos.sh --install` or the link from
+[the download steps](#download-the-app) (the binary inside the app bundle). The commands go to the running app (over
 `$XDG_RUNTIME_DIR/monitor-input-switcher.sock` on Linux, `/tmp/monitor-input-switcher-<uid>/` on
 macOS, a named pipe on Windows), so DDC operations never overlap. If the app isn't running,
 `switch`, `next`, `get` and `list` talk to the monitor directly. `export` and `import` work either way; `import` has a running app reload the new
@@ -273,7 +299,7 @@ directly, so a switch takes about 30 ms.
 | Single instance | `flock` on `$XDG_RUNTIME_DIR/monitor-input-switcher.lock`. |
 | Notifications | `org.freedesktop.Notifications`. |
 
-### Keyboard layouts and Shift+digit shortcuts (KDE)
+### Keyboard layouts and shortcuts
 
 KWin drops Shift from a shortcut when Shift was needed to type a non-letter. As a result,
 `Ctrl+Alt+Shift+1` arrives as `Ctrl+Alt+1` on AZERTY and as `Ctrl+Alt+!` on QWERTY. The app reads your
@@ -281,8 +307,13 @@ layouts from `~/.config/kxkbrc` and registers every variant, so the shortcut wor
 `us`. One side effect on the `us` layout: `Ctrl+Alt+1` *without* Shift also triggers it. Digit-row
 keys are recorded by position, as on Windows.
 
-Punctuation keys, on both systems, are recorded as the character your layout puts on them: the key
-left of `1` is saved as `²` on a French layout and as `` ` `` on a US one.
+On Linux and Windows, punctuation keys are recorded as the character your layout puts on them: the
+key left of `1` is saved as `²` on a French layout and as `` ` `` on a US one.
+
+On macOS, shortcuts are registered by key position on the US (ANSI) layout, whatever your layout.
+Settings records letters, digits and punctuation the same way, by position, since Option changes
+the character a key types (`Option+S` types `ß`). So the key left of `1` is saved as `` ` `` on any
+layout, and on AZERTY the key labeled `A` is saved as `Q`.
 
 ### DDC/CI on macOS
 
@@ -294,6 +325,10 @@ to a display. MonitorControl, m1ddc and BetterDisplay use it too.
 | DDC/CI | `IOAVServiceWriteI2C` / `IOAVServiceReadI2C` to address `0x37` with `0x51` as the register, then the same packets, timing and retries as on Linux (the protocol code is shared, in `src/platform/ddcci.rs`). |
 | Detection | Walks the IORegistry: each framebuffer (`AppleCLCD2`) gives the EDID model name from its `DisplayAttributes`, and the `DCPAVServiceProxy` after it with `"Location" = "External"` is its DDC channel. The built-in screen's proxy says `"Embedded"` and is skipped. |
 | Shortcuts | Carbon `RegisterEventHotKey`, by key position on the ANSI layout. It needs no Accessibility permission. As on Windows, they're released while Settings is open so it can record them. |
+| Menu bar item | `NSStatusItem` with an `NSMenu`, no Dock icon (`LSUIElement` in the bundle's `Info.plist`). |
+| Notifications | `osascript -e 'display notification …'`, which works without an app bundle or code signing. |
+| Open at Login | A per-user LaunchAgent, `~/Library/LaunchAgents/io.github.monitor-input-switcher.plist`, rewritten at each start if the app moved. |
+| Single instance, CLI | `flock` and a Unix socket in `/tmp/monitor-input-switcher-<uid>/`, the same code as Linux. |
 | Threads | AppKit owns the main thread; the app's event loop runs on another one and drives the menu by dispatching to the main queue. |
 
 ### Quirks I ran into
@@ -334,15 +369,16 @@ These come from my monitor; yours may behave differently, and the app tries not 
 cargo test                                        # unit tests
 cargo check --target x86_64-pc-windows-msvc       # type-check the Windows build from Linux or macOS
 cargo check --target x86_64-unknown-linux-gnu     # type-check the Linux build from macOS
+cargo check --target aarch64-apple-darwin         # type-check the macOS build from Linux or Windows
 ```
 
 To publish a release, bump `version` in `Cargo.toml`, commit, then push a matching tag:
 `git tag v1.0.0 && git push origin v1.0.0`. The `Release` workflow (`.github/workflows/release.yml`)
-builds and tests Linux and Windows and attaches the binaries to a new GitHub release. To check that the
+builds and tests Linux, Windows and macOS and attaches the binaries to a new GitHub release. To check that the
 builds pass before tagging, run it by hand with `gh workflow run release.yml` (or Actions > Release >
 Run workflow): it builds and tests without publishing anything, and keeps the binaries as artifacts
-of the run. The workflow doesn't build macOS yet: build and test it on a Mac with
-`./scripts/build-macos.sh` and `cargo test`.
+of the run. The `CI` workflow (`.github/workflows/ci.yml`) also builds and tests all three systems
+on every push to `main` and every pull request.
 
 ```
 src/                  shared code: config, daemon, Settings window, CLI, capabilities parsing
@@ -353,7 +389,7 @@ src/platform/ddcci.rs the DDC/CI packets shared by Linux and macOS
 assets/               icons (PNG for the tray and windows, ICO embedded in the Windows exe)
 scripts/              build.sh / build.bat / build-macos.sh, plus the Linux install / uninstall / one-time system setup scripts
 docs/screenshots/     the screenshots above
-.github/workflows/    the release workflow
+.github/workflows/    the CI and release workflows
 ```
 
 ## License

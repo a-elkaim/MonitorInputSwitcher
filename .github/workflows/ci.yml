@@ -1,0 +1,41 @@
+# Builds and tests on Linux, Windows and macOS for every push to main and every pull request, so a
+# change that breaks one platform is caught before it's merged.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        shell: bash
+        run: rustup update stable && rustup default stable
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libxkbcommon-dev libwayland-dev libegl-dev
+
+      - name: Build
+        run: cargo build --locked
+
+      - name: Test
+        run: cargo test --locked
+
+      # Also checks that the .app bundle script works.
+      - name: Build the app bundle (macOS)
+        if: runner.os == 'macOS'
+        run: ./scripts/build-macos.sh --debug
